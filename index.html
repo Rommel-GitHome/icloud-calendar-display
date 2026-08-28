@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Calendar</title>
+
+<style>
+    * {
+        box-sizing: border-box;
+    }
+
+    html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        font-family: Arial, Helvetica, sans-serif;
+        background: #ffffff;
+        color: #222;
+    }
+
+    #calendar {
+        width: 100vw;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+    }
+
+    #header {
+        height: 10vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 4vh;
+        font-weight: bold;
+    }
+
+    #weekdays {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        height: 6vh;
+        border-bottom: 1px solid #ccc;
+    }
+
+    .weekday {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 2.2vh;
+        font-weight: bold;
+    }
+
+    #days {
+        flex: 1;
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        grid-template-rows: repeat(6, 1fr);
+    }
+
+    .day {
+        border-right: 1px solid #ddd;
+        border-bottom: 1px solid #ddd;
+        padding: 0.7vh;
+        overflow: hidden;
+    }
+
+    .day-number {
+        font-size: 1.8vh;
+        font-weight: bold;
+        margin-bottom: 0.4vh;
+    }
+
+    .today {
+        background: #f0f6ff;
+    }
+
+    .event {
+        background: #1976d2;
+        color: white;
+        border-radius: 4px;
+        padding: 0.4vh 0.5vh;
+        margin-bottom: 0.3vh;
+        font-size: 1.45vh;
+        line-height: 1.2;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+    }
+
+    .other-month {
+        color: #aaa;
+        background: #fafafa;
+    }
+
+    #status {
+        position: fixed;
+        bottom: 5px;
+        right: 8px;
+        font-size: 10px;
+        color: #999;
+    }
+</style>
+</head>
+
+<body>
+
+<div id="calendar">
+
+    <div id="header"></div>
+
+    <div id="weekdays">
+        <div class="weekday">Monday</div>
+        <div class="weekday">Tuesday</div>
+        <div class="weekday">Wednesday</div>
+        <div class="weekday">Thursday</div>
+        <div class="weekday">Friday</div>
+        <div class="weekday">Saturday</div>
+        <div class="weekday">Sunday</div>
+    </div>
+
+    <div id="days"></div>
+
+</div>
+
+<div id="status">Loading calendar...</div>
+
+<script type="module">
+
+import ICAL from "https://unpkg.com/ical.js/dist/ical.min.js";
+
+/*
+ * YOUR PUBLIC ICLOUD CALENDAR
+ *
+ * Replace the URL below with your iCloud webcal URL.
+ */
+const ICS_URL =
+    "webcal://p187-caldav.icloud.com/published/2/MTYxNjc3MzkwNzE2MTY3N4LgCP7GFVOgx0KgXRjhWRaa4aPXQc-CQHmdVNd4f-vG0MraeqWlzKb4c73tS4P1X99ZDKzNrbTAoGXRru8vj1k";
+
+
+/*
+ * How often the calendar should be downloaded.
+ *
+ * 5 minutes = 300000 milliseconds
+ */
+const REFRESH_INTERVAL = 5 * 60 * 1000;
+
+
+/*
+ * Current month is automatically selected.
+ */
+let currentDate = new Date();
+
+let events = [];
+
+
+/*
+ * Convert webcal:// to https://
+ */
+function getFetchURL(url) {
+
+    if (url.startsWith("webcal://")) {
+        return "https://" + url.substring(9);
+    }
+
+    return url;
+}
+
+
+/*
+ * Download and parse the ICS calendar.
+ */
+async function loadCalendar() {
+
+    try {
+
+        document.getElementById("status").textContent =
+            "Updating calendar...";
+
+        const url = getFetchURL(ICS_URL);
+
+        /*
+         * Cache-busting parameter.
+         *
+         * This asks the browser/proxy for a fresh request.
+         */
+        const separator = url.includes("?") ? "&" : "?";
+
+        const freshURL =
+            url + separator + "_=" + Date.now();
+
+        const response = await fetch(freshURL, {
+            cache: "no-store"
+        });
+
+        if (!response.ok) {
+            throw new Error(
+                "Calendar request failed: " + response.status
+            );
+        }
+
+        const icsText = await response.text();
+
+        const jcalData = ICAL.parse(icsText);
+
+        const component = new ICAL.Component(jcalData);
+
+        const vevents =
+            component.getAllSubcomponents("vevent");
+
+        events = [];
+
+        for (const vevent of vevents) {
+
+            const event = new ICAL.Event(vevent);
+
+            const start =
+                event.startDate.toJSDate();
+
+            const end =
+                event.endDate
+                    ? event.endDate.toJSDate()
+                    : new Date(start.getTime() + 60 * 60 * 1000);
+
+            events.push({
+                title: event.summary || "",
+                start: start,
+                end: end
+            });
+        }
+
+        renderCalendar();
+
+        document.getElementById("status").textContent =
+            "Updated: " + new Date().toLocaleTimeString();
+
+    } catch (error) {
+
+        console.error(error);
+
+        document.getElementById("status").textContent =
+            "Calendar update failed";
+
+    }
+}
+
+
+/*
+ * Render current month.
+ */
+function renderCalendar() {
+
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+
+    const monthName =
+        currentDate.toLocaleString("en-US", {
+            month: "long"
+        });
+
+    document.getElementById("header").textContent =
+        monthName + " " + year;
+
+    const daysContainer =
+        document.getElementById("days");
+
+    daysContainer.innerHTML = "";
+
+
+    /*
+     * Find Monday before/on the first day.
+     */
+    const firstDay =
+        new Date(year, month, 1);
+
+    let startDay =
+        firstDay.getDay();
+
+    /*
+     * Convert Sunday=0 to Monday=0.
+     */
+    startDay =
+        startDay === 0 ? 6 : startDay - 1;
+
+
+    /*
+     * Always render 6 weeks.
+     */
+    const gridStart =
+        new Date(year, month, 1 - startDay);
+
+
+    for (let i = 0; i < 42; i++) {
+
+        const dayDate =
+            new Date(
+                gridStart.getFullYear(),
+                gridStart.getMonth(),
+                gridStart.getDate() + i
+            );
+
+        const cell =
+            document.createElement("div");
+
+        cell.className = "day";
+
+
+        if (dayDate.getMonth() !== month) {
+            cell.classList.add("other-month");
+        }
+
+
+        /*
+         * Highlight today.
+         */
+        const today = new Date();
+
+        if (
+            dayDate.getFullYear() === today.getFullYear() &&
+            dayDate.getMonth() === today.getMonth() &&
+            dayDate.getDate() === today.getDate()
+        ) {
+            cell.classList.add("today");
+        }
+
+
+        const number =
+            document.createElement("div");
+
+        number.className = "day-number";
+
+        number.textContent =
+            dayDate.getDate();
+
+        cell.appendChild(number);
+
+
+        /*
+         * Add events.
+         */
+        const dayEvents =
+            events.filter(event => {
+
+                return (
+                    dayDate >= startOfDay(event.start) &&
+                    dayDate <= startOfDay(event.end)
+                );
+
+            });
+
+
+        for (const event of dayEvents) {
+
+            const eventElement =
+                document.createElement("div");
+
+            eventElement.className = "event";
+
+            eventElement.textContent =
+                event.title;
+
+            cell.appendChild(eventElement);
+        }
+
+
+        daysContainer.appendChild(cell);
+    }
+}
+
+
+/*
+ * Start of day helper.
+ */
+function startOfDay(date) {
+
+    return new Date(
+        date.getFullYear(),
+        date.getMonth(),
+        date.getDate()
+    );
+}
+
+
+/*
+ * Load calendar immediately.
+ */
+loadCalendar();
+
+
+/*
+ * Automatically refresh calendar data.
+ */
+setInterval(
+    loadCalendar,
+    REFRESH_INTERVAL
+);
+
+
+/*
+ * Check whether midnight has passed.
+ *
+ * This ensures that the display automatically
+ * moves to the new month without restarting.
+ */
+setInterval(() => {
+
+    const now = new Date();
+
+    if (
+        now.getMonth() !== currentDate.getMonth() ||
+        now.getFullYear() !== currentDate.getFullYear()
+    ) {
+
+        currentDate = now;
+
+        renderCalendar();
+    }
+
+}, 60 * 1000);
+
+</script>
+
+</body>
+</html>
